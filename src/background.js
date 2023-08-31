@@ -10,13 +10,26 @@
  *
  * @todo @function setIcon rewrite without using bools but including check for it
  * @todo remove @var SITE_STATUS and rewrite to integrate Status without it
+ * possible using a State Variable to include activeSites and status for better checks/changes
  */
 
 const SETTINGS = {
 	DB_NAME: 'MANAvActiveSites',
-	SITE_STATUS: false,
+	// SITE_STATUS: false,
 	ICON_ON: './icons/manav-on.svg',
 	ICON_OFF: './icons/manav-off.svg'
+};
+
+/**
+ * State Object
+ * @var activeSites - the current Sites Array where the Extension is active
+ * @var {bool} status  - current Extension Status (Active/Inactive)
+ * @var {string} originURL - Current Tab URL stripped to .origin Format
+ */
+const extnData = {
+	activeSites: [],
+	status: false,
+	originURL: ''
 };
 
 /**
@@ -50,11 +63,16 @@ async function setURLs(arr) {
  * @param {Array} toCheckURLs - Array representing all current active Sites
  * @returns {bool}
  */
-async function checkURL(originURL, toCheckURLs) {
-	if (toCheckURLs.includes(originURL)) {
+async function checkURL(originURL) {
+	if (extnData.activeSites.includes(originURL)) {
 		return true;
 	}
 	return false;
+}
+
+async function updateActiveSites() {
+	// extnData.activeSites = browser.storage.local.get([SETTINGS.DB_NAME] ?? []);
+	console.log('update Event');
 }
 
 /**
@@ -87,8 +105,8 @@ function switchIcon(bool) {
 function sendSignal(tabID, msg) {
 	browser.tabs.sendMessage(tabID, msg);
 }
-// testing
-const count = 0;
+
+async function update() {}
 
 /**
  * Handles Update Event from the active Tab
@@ -101,34 +119,36 @@ const count = 0;
  * to Send Messages properly to the content script we need to wait until this Event is finished
  *
  * @todo Rewrite so we dont use @var SITE_STATUS and wait for complete Status to do anything
+ * @todo rewrite Icon switching to include checks
  */
 async function handleUpdate(tabID, changeInfo, tab) {
-	// Get URL and check it against the Active Sites Array
+	// Wait for the url to be updated and store it in State
 	if (changeInfo.url) {
-		const originURL = await stripToOriginURL(changeInfo.url);
-		const activeSitesURLs = await getURLs();
+		extnData.originURL = await stripToOriginURL(changeInfo.url);
+	}
 
-		if (await checkURL(originURL, activeSitesURLs)) {
-			SETTINGS.SITE_STATUS = true;
-		} else {
-			SETTINGS.SITE_STATUS = false;
+	if (tab.status === 'complete') {
+		// Check if URL should be active
+		if (await checkURL(originURL)) {
+			extnData.status = true;
 		}
+		console.log(extnData.status);
 	}
 
 	// After checking and waiting for the changeInfo event to finish
 	// Depending on the Outcome switch Extension Icon and send Message to content script!
-	if (changeInfo.status === 'complete' && tab.status === 'complete') {
-		if (SETTINGS.SITE_STATUS) {
-			// Switch to On Icon and send Signal to Tab
-			console.log('site is in array');
-			switchIcon(true);
-			sendSignal(tabID, 'bg.js -> send msg from true');
-		} else {
-			console.log('site is not in array');
-			switchIcon(false);
-			sendSignal(tabID, 'bg.js -> send msg from false');
-		}
-	}
+	// if (changeInfo.status === 'complete' && tab.status === 'complete') {
+	// 	if (SETTINGS.SITE_STATUS) {
+	// 		// Switch to On Icon and send Signal to Tab
+	// 		console.log('site is in array');
+	// 		switchIcon(true);
+	// 		sendSignal(tabID, true);
+	// 	} else {
+	// 		console.log('site is not in array');
+	// 		switchIcon(false);
+	// 		sendSignal(tabID, false);
+	// 	}
+	// }
 }
 
 /**
@@ -137,22 +157,39 @@ async function handleUpdate(tabID, changeInfo, tab) {
  * @param {*} onClickData
  */
 async function handleOnClick(tab, onClickData) {
+	// testing
+	const test = await getURLs();
+	test.push('zzzzzzz');
+	browser.storage.local.set(await setURLs(test));
+
 	if (tab.status === 'complete') {
-		const originURL = await stripToOriginURL(tab.url);
-		const activeSiteURLs = await getURLs();
-
-		// Add/Remove URL from Active Site Array and use correct Icon for the State after
-		if (await checkURL(originURL, activeSiteURLs)) {
-			activeSiteURLs.splice(activeSiteURLs.indexOf(originURL), 1);
-			switchIcon(false);
-		} else {
-			activeSiteURLs.push(originURL);
-			switchIcon(true);
-		}
-
-		await setURLs(activeSiteURLs);
+		// const originURL = await stripToOriginURL(tab.url);
+		// const activeSiteURLs = await getURLs();
+		// // Add/Remove URL from Active Site Array and use correct Icon for the State after
+		// if (await checkURL(originURL, activeSiteURLs)) {
+		// 	console.log('test');
+		// 	activeSiteURLs.splice(activeSiteURLs.indexOf(originURL), 1);
+		// 	switchIcon(false);
+		// 	sendSignal(false);
+		// } else {
+		// 	activeSiteURLs.push(originURL);
+		// 	switchIcon(true);
+		// 	sendSignal(true);
+		// }
+		// await setURLs(activeSiteURLs);
 	}
 }
 
+async function handleStorageChange(changedData) {
+	extnData.activeSites = await getURLs();
+	console.log('from storage change -> ', extnData.activeSites);
+}
+
+// Setting Default Value on Extension Install
+browser.runtime.onInstalled.addListener(() => {
+	browser.storage.local.set({ [SETTINGS.DB_NAME]: [] });
+});
+
 browser.tabs.onUpdated.addListener(handleUpdate);
 browser.action.onClicked.addListener(handleOnClick);
+browser.storage.onChanged.addListener(handleStorageChange);
