@@ -11,11 +11,12 @@
  * @todo @function setIcon rewrite without using bools but including check for it
  * @todo remove @var SITE_STATUS and rewrite to integrate Status without it
  * possible using a State Variable to include activeSites and status for better checks/changes
+ * @todo duplicate check before storing new urls
+ * @bug possible storage.StorageArea.onChanged Event will not fire in non persistant idle state
  */
 
 const SETTINGS = {
 	DB_NAME: 'MANAvActiveSites',
-	// SITE_STATUS: false,
 	ICON_ON: './icons/manav-on.svg',
 	ICON_OFF: './icons/manav-off.svg'
 };
@@ -26,7 +27,7 @@ const SETTINGS = {
  * @var {bool} status  - current Extension Status (Active/Inactive)
  * @var {string} originURL - Current Tab URL stripped to .origin Format
  */
-const extnData = {
+const extData = {
 	activeSites: [],
 	status: false,
 	originURL: ''
@@ -58,21 +59,19 @@ async function setURLs(arr) {
 }
 
 /**
- * URL Check if present in Active Site Array
+ * Checks if Value is in Active Site Array and set State Status accordingly
  * @param {string} originURL - the present URL stripped down to .origin Values
- * @param {Array} toCheckURLs - Array representing all current active Sites
- * @returns {bool}
  */
-async function checkURL(originURL) {
-	if (extnData.activeSites.includes(originURL)) {
-		return true;
+async function statusOfURL(originURL) {
+	if (extData.activeSites.includes(originURL)) {
+		extData.status = true;
+		return;
 	}
-	return false;
+	extData.status = false;
 }
 
 async function updateActiveSites() {
-	// extnData.activeSites = browser.storage.local.get([SETTINGS.DB_NAME] ?? []);
-	console.log('update Event');
+	extData.activeSites = browser.storage.local.get([SETTINGS.DB_NAME] ?? []);
 }
 
 /**
@@ -86,11 +85,10 @@ async function stripToOriginURL(url) {
 }
 
 /**
- * Change Extension Icon depening on Status from the Active Site Array
- * @param {bool} bool
+ * Update Extension Icon depening on Status
  */
-function switchIcon(bool) {
-	if (bool) {
+function updateIcon() {
+	if (extData.status) {
 		browser.action.setIcon({ path: SETTINGS.ICON_ON });
 		return;
 	}
@@ -106,7 +104,7 @@ function sendSignal(tabID, msg) {
 	browser.tabs.sendMessage(tabID, msg);
 }
 
-async function update() {}
+// async function update() {}
 
 /**
  * Handles Update Event from the active Tab
@@ -117,38 +115,18 @@ async function update() {}
  * @Info the changeInfo Object is changing everytime the Event is fired ending in only
  * a changeInfo.status === complete State.
  * to Send Messages properly to the content script we need to wait until this Event is finished
- *
- * @todo Rewrite so we dont use @var SITE_STATUS and wait for complete Status to do anything
- * @todo rewrite Icon switching to include checks
  */
-async function handleUpdate(tabID, changeInfo, tab) {
+async function handleUpdate(_, changeInfo, tab) {
 	// Wait for the url to be updated and store it in State
 	if (changeInfo.url) {
-		extnData.originURL = await stripToOriginURL(changeInfo.url);
+		extData.originURL = await stripToOriginURL(changeInfo.url);
 	}
 
 	if (tab.status === 'complete') {
-		// Check if URL should be active
-		if (await checkURL(originURL)) {
-			extnData.status = true;
-		}
-		console.log(extnData.status);
+		await statusOfURL(extData.originURL);
+		await updateIcon();
+		// add send signal
 	}
-
-	// After checking and waiting for the changeInfo event to finish
-	// Depending on the Outcome switch Extension Icon and send Message to content script!
-	// if (changeInfo.status === 'complete' && tab.status === 'complete') {
-	// 	if (SETTINGS.SITE_STATUS) {
-	// 		// Switch to On Icon and send Signal to Tab
-	// 		console.log('site is in array');
-	// 		switchIcon(true);
-	// 		sendSignal(tabID, true);
-	// 	} else {
-	// 		console.log('site is not in array');
-	// 		switchIcon(false);
-	// 		sendSignal(tabID, false);
-	// 	}
-	// }
 }
 
 /**
@@ -158,10 +136,20 @@ async function handleUpdate(tabID, changeInfo, tab) {
  */
 async function handleOnClick(tab, onClickData) {
 	// testing
-	const test = await getURLs();
-	test.push('zzzzzzz');
-	browser.storage.local.set(await setURLs(test));
+	// const test = await getURLs();
+	// test.push('zzzzzzz');
+	// browser.storage.local.set(await setURLs(test));
 
+	// check for URL Duplicate
+	// could be a problem when tab is not complete as url
+	// only changes on update Event
+	if (await statusOfURL(extData.originURL)) {
+		console.log('url is duplicate');
+	} else {
+		console.log('url is unique');
+	}
+
+	// ! do we need to wait for status?
 	if (tab.status === 'complete') {
 		// const originURL = await stripToOriginURL(tab.url);
 		// const activeSiteURLs = await getURLs();
@@ -181,13 +169,21 @@ async function handleOnClick(tab, onClickData) {
 }
 
 async function handleStorageChange(changedData) {
-	extnData.activeSites = await getURLs();
-	console.log('from storage change -> ', extnData.activeSites);
+	console.log('Storage Change!');
+	extData.activeSites = await getURLs();
+	console.log('from storage change -> ', extData.activeSites);
+
+	// add Update function for Icons etc
 }
+
+// Run once at the Start
+(async () => {
+	await updateActiveSites();
+})();
 
 // Setting Default Value on Extension Install
 browser.runtime.onInstalled.addListener(() => {
-	browser.storage.local.set({ [SETTINGS.DB_NAME]: [] });
+	browser.storage.local.set({ [SETTINGS.DB_NAME]: ['https://asuracomics.com'] });
 });
 
 browser.tabs.onUpdated.addListener(handleUpdate);
