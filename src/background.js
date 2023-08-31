@@ -41,7 +41,7 @@ async function getURLs() {
 	// Check and Set Default DB Name and Values if not present
 	const currentDB = await browser.storage.local.get(SETTINGS.DB_NAME);
 	if (currentDB[SETTINGS.DB_NAME] === undefined) {
-		console.log('DB not Found... Setting Default Values...');
+		console.warn('DB not Found... Setting Default Values...');
 		await setURLs([]);
 		return [];
 	}
@@ -56,14 +56,21 @@ async function setURLs(arr) {
 	await browser.storage.local.set({
 		[SETTINGS.DB_NAME]: arr
 	});
+	await updateActiveSites();
+}
+
+async function deleteURL(url) {
+	extData.activeSites.splice(extData.activeSites.indexOf(url), 1);
+	browser.storage.local.set({ [SETTINGS.DB_NAME]: extData.activeSites });
+	// ! missing update to extData.status
 }
 
 /**
  * Checks if Value is in Active Site Array and set State Status accordingly
- * @param {string} originURL - the present URL stripped down to .origin Values
+ * @param {string} url - the present URL stripped down to .origin Values
  */
-async function statusOfURL(originURL) {
-	if (extData.activeSites.includes(originURL)) {
+async function statusOfURL(url) {
+	if (extData.activeSites.includes(url)) {
 		extData.status = true;
 		return;
 	}
@@ -71,7 +78,15 @@ async function statusOfURL(originURL) {
 }
 
 async function updateActiveSites() {
-	extData.activeSites = browser.storage.local.get([SETTINGS.DB_NAME] ?? []);
+	extData.activeSites = (await getURLs(extData.originURL)) ?? browser.storage.local.get([SETTINGS.DB_NAME] ?? []);
+}
+
+async function updateStatus(bool) {
+	if (bool) {
+		extData.status = false;
+		return;
+	}
+	extData.status = true;
 }
 
 /**
@@ -88,6 +103,7 @@ async function stripToOriginURL(url) {
  * Update Extension Icon depening on Status
  */
 function updateIcon() {
+	console.log('icon update');
 	if (extData.status) {
 		browser.action.setIcon({ path: SETTINGS.ICON_ON });
 		return;
@@ -103,8 +119,6 @@ function updateIcon() {
 function sendSignal(tabID, msg) {
 	browser.tabs.sendMessage(tabID, msg);
 }
-
-// async function update() {}
 
 /**
  * Handles Update Event from the active Tab
@@ -125,7 +139,7 @@ async function handleUpdate(_, changeInfo, tab) {
 	if (tab.status === 'complete') {
 		await statusOfURL(extData.originURL);
 		await updateIcon();
-		// add send signal
+		// ? add send signal
 	}
 }
 
@@ -133,24 +147,31 @@ async function handleUpdate(_, changeInfo, tab) {
  * Handle onClick Events from the Extension Button
  * @param {*} tab - Tab Object
  * @param {*} onClickData
+ *
+ * @todo Icon doesnt get update correctly.
+ * @todo add/delete doesnt work properly sometimes
  */
-async function handleOnClick(tab, onClickData) {
-	// testing
-	// const test = await getURLs();
-	// test.push('zzzzzzz');
-	// browser.storage.local.set(await setURLs(test));
-
-	// check for URL Duplicate
-	// could be a problem when tab is not complete as url
-	// only changes on update Event
-	if (await statusOfURL(extData.originURL)) {
-		console.log('url is duplicate');
-	} else {
-		console.log('url is unique');
-	}
-
-	// ! do we need to wait for status?
+async function handleOnClick(tab, _) {
 	if (tab.status === 'complete') {
+		// Delete URL from Active Sites
+		if (extData.status === true) {
+			await deleteURL(extData.originURL);
+			await updateStatus();
+		}
+
+		// Add URL to Active Sites
+		if (extData.status === false) {
+			const newActiveSites = await getURLs();
+			newActiveSites.push(extData.originURL);
+			await setURLs(newActiveSites);
+			await updateStatus();
+		}
+
+		await updateIcon();
+		//? add Signals
+
+		// ! do we need to wait for status?
+		// if (tab.status === 'complete') {
 		// const originURL = await stripToOriginURL(tab.url);
 		// const activeSiteURLs = await getURLs();
 		// // Add/Remove URL from Active Site Array and use correct Icon for the State after
@@ -165,15 +186,14 @@ async function handleOnClick(tab, onClickData) {
 		// 	sendSignal(true);
 		// }
 		// await setURLs(activeSiteURLs);
+		// }
 	}
 }
 
 async function handleStorageChange(changedData) {
-	console.log('Storage Change!');
-	extData.activeSites = await getURLs();
+	await updateActiveSites();
 	console.log('from storage change -> ', extData.activeSites);
-
-	// add Update function for Icons etc
+	await updateIcon();
 }
 
 // Run once at the Start
